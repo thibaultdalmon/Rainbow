@@ -1,5 +1,5 @@
 from Agents.RandomAgent import RandomAgent
-from utils.Plots import plot_rewards
+from utils.Plots import RewardPlot
 
 import gym
 
@@ -11,9 +11,10 @@ class Trainer:
         self.agent = RandomAgent(self.env)
         self.n_episode = args.n_episodes
 
-        self.list_of_rewards = []
+        self.reward_plot = RewardPlot()
 
     def run(self):
+        list_of_rewards = []
         for _ in range(self.n_episode):
             observation = self.env.reset()
             done = False
@@ -24,7 +25,7 @@ class Trainer:
                 observation, reward, done, info = self.env.step(action)
                 total_reward += reward
 
-            self.list_of_rewards.append(total_reward)
-        plot_rewards(self.list_of_rewards, plot=True, save=False)
+            list_of_rewards.append(total_reward)
+            self.reward_plot.update_and_plot(list_of_rewards, plot=True, save=False)
         self.env.close()
 
