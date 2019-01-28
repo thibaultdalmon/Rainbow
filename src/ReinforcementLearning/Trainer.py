@@ -12,9 +12,13 @@ class Trainer:
 
     def run(self):
         observation = self.env.reset()
+        rewards = 0
         for _ in range(self.n_episode):
+            self.env.render(mode='human')
             action = self.agent.choose_action(observation)
             observation, reward, done, info = self.env.step(action)
+            rewards += 0
             if done:
                 break
+        self.env.close()
 

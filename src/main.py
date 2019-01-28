@@ -5,7 +5,7 @@ import argparse
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--env_name', type=str, default='Seaquest-v0')
-parser.add_argument('--n_episodes', type=int, default=5)
+parser.add_argument('--n_episodes', type=int, default=2000)
 
 args = parser.parse_args()
 
