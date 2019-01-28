@@ -1,5 +1,6 @@
 from Agents.RandomAgent import RandomAgent
 from Agents.DQNAgent import DQNAgent
+from utils.Plots import plot_rewards
 
 import gym
 import numpy as np
@@ -17,13 +18,22 @@ class Trainer:
         self.total_max_q = 0
         self.mean_max_q = 0.0
 
+        self.list_of_rewards = []
+
     def run(self):
-        observation = self.env.reset()
         for _ in range(self.n_episode):
-            action = self.agent.choose_action(observation)
-            observation, reward, done, info = self.env.step(action)
-            if done:
-                break
+            observation = self.env.reset()
+            done = False
+            total_reward = 0
+
+            while not done:
+                action = self.agent.choose_action(observation)
+                observation, reward, done, info = self.env.step(action)
+                total_reward += reward
+
+            self.list_of_rewards.append(total_reward)
+        plot_rewards(self.list_of_rewards, plot=True, save=False)
+        self.env.close()
 
     def run_dqn(self):
         observation = self.env.reset()
