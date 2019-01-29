@@ -113,7 +113,7 @@ class DQNAgent:
 
 class ReplayMemory:
     def __init__(self):
-        self.maxlen = 500000
+        self.maxlen = 1000000
         self.buf = np.empty(shape=self.maxlen, dtype=np.object)
         self.index = 0
         self.length = 0

@@ -20,7 +20,7 @@ class Trainer:
         self.copy_steps = 10000  # copy online DQN to target DQN every 10,000 training steps
         self.discount_rate = 0.99
         self.skip_start = 0  # Skip the start of every game
-        self.batch_size = 50
+        self.batch_size = 32
         self.iteration = 0  # game iterations
         self.step = 0
         self.loss_val = np.infty
@@ -32,6 +32,7 @@ class Trainer:
         self.checkpoint_path = "../DQN/DQN_test.ckpt"
 
         self.reward_plot = RewardPlot()
+        self.doubleQlearning = True
 
     def run(self):
         list_of_rewards = []
@@ -115,10 +116,21 @@ class Trainer:
                 # Sample memories and use the target DQN to produce the target Q-Value
                 X_state_val, X_action_val, rewards, X_next_state_val, continues = (
                     self.agent_dqn.sample_memories(self.batch_size))
-                next_q_values = self.agent_dqn.target_q_values.eval(
-                    feed_dict={self.agent_dqn.X_state: X_next_state_val})
-                max_next_q_values = np.max(next_q_values, axis=1, keepdims=True)
-                y_val = rewards + continues * self.discount_rate * max_next_q_values
+                if self.doubleQlearning:
+                    next_online_actions = self.agent_dqn.online_q_values
+                    max_action = tf.argmax(next_online_actions, axis=1)
+                    q_values = self.agent_dqn.target_q_values
+                    next_q_values = tf.reduce_sum(
+                        q_values * tf.one_hot(max_action, self.env.action_space.n),
+                        axis=1, keepdims=True)
+                    target_q_values = next_q_values.eval(
+                        feed_dict={self.agent_dqn.X_state: X_next_state_val})
+                    y_val = rewards + continues * self.discount_rate * target_q_values
+                else:
+                    next_q_values = self.agent_dqn.target_q_values.eval(
+                        feed_dict={self.agent_dqn.X_state: X_next_state_val})
+                    max_next_q_values = np.max(next_q_values, axis=1, keepdims=True)
+                    y_val = rewards + continues * self.discount_rate * max_next_q_values
 
                 # Train the online DQN
                 _, self.loss_val = sess.run([self.agent_dqn.training_op, self.agent_dqn.loss],
