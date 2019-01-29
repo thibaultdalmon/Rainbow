@@ -37,6 +37,8 @@ class DQNAgent:
         self.eps_max = 1.0
         self.eps_decay_steps = 200000
 
+        self.dueling = True
+
         def q_network(X_state, name):
             prev_layer = X_state / 128.0
             with tf.variable_scope(name) as scope:
@@ -53,6 +55,15 @@ class DQNAgent:
                                          kernel_initializer=self.initializer)
                 outputs = tf.layers.dense(hidden, self.n_outputs,
                                           kernel_initializer=self.initializer)
+                if self.dueling:
+                    hidden2 = tf.layers.dense(last_conv_layer_flat, self.n_hidden,
+                                             activation=self.hidden_activation,
+                                             kernel_initializer=self.initializer)
+                    estimate_value = tf.layers.dense(hidden2, 1,
+                                              kernel_initializer=self.initializer)
+                    advantage = tf.subtract(outputs,tf.reduce_mean(outputs, axis=1, keepdims=True))
+                    outputs = tf.add(estimate_value, advantage)
+
             trainable_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                                                scope=scope.name)
             trainable_vars_by_name = {var.name[len(scope.name):]: var
