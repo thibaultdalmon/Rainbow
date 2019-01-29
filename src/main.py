@@ -1,6 +1,15 @@
 from ReinforcementLearning.Trainer import Trainer
 
+import matplotlib
+matplotlib.use('Qt5Agg')
+from matplotlib import pyplot as plt
+
 import argparse
+import os
+
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+
+plt.ion()
 
 parser = argparse.ArgumentParser()
 
@@ -11,3 +20,5 @@ args = parser.parse_args()
 
 trainer = Trainer(args)
 trainer.run_dqn()
+
+plt.ioff()
