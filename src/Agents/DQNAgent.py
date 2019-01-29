@@ -29,6 +29,8 @@ class DQNAgent:
         self.initializer = tf.variance_scaling_initializer()
 
         self.learning_rate = 0.001
+        self.momentum = 0.95
+
         self.memory = ReplayMemory()
 
         self.eps_min = 0.1
@@ -77,7 +79,7 @@ class DQNAgent:
             self.loss = tf.reduce_mean(tf.square(clipped_error) + linear_error)
 
             self.global_step = tf.Variable(0, trainable=False, name='global_step')
-            optimizer = tf.train.AdamOptimizer(self.learning_rate)
+            optimizer = tf.train.RMSPropOptimizer(self.learning_rate, momentum=self.momentum)
             self.training_op = optimizer.minimize(self.loss, global_step=self.global_step)
 
         self.init = tf.global_variables_initializer()

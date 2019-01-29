@@ -27,6 +27,8 @@ class Trainer:
         self.game_length = 0
         self.total_max_q = 0
         self.mean_max_q = 0.0
+        self.total_reward = 0
+        self.mean_reward = 0.0
         self.checkpoint_path = "../DQN/DQN_test.ckpt"
 
         self.reward_plot = RewardPlot()
@@ -61,6 +63,7 @@ class Trainer:
 
     def run_dqn(self):
         done = True
+        list_of_rewards = []
         with tf.Session() as sess:
             if os.path.isfile(self.checkpoint_path + ".index"):
                 self.agent_dqn.saver.restore(sess, self.checkpoint_path)
@@ -95,11 +98,16 @@ class Trainer:
 
                 # Compute statistics for tracking progress
                 self.total_max_q += q_values.max()
+                self.total_reward += reward
                 self.game_length += 1
                 if done:
                     self.mean_max_q = self.total_max_q / self.game_length
                     self.total_max_q = 0.0
+                    self.mean_reward = self.total_reward / self.game_length
+                    self.total_reward = 0.0
                     self.game_length = 0
+                    list_of_rewards.append(self.mean_reward)
+                    self.reward_plot.update_and_plot(list_of_rewards, plot=True, save=False)
 
                 if self.iteration < self.training_start or self.iteration % self.training_interval != 0:
                     continue # only train after warmup period and at regular intervals
