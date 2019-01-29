@@ -5,6 +5,9 @@ matplotlib.use('Qt5Agg')
 from matplotlib import pyplot as plt
 
 import argparse
+import os
+
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 plt.ion()
 

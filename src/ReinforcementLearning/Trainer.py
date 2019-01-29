@@ -22,16 +22,28 @@ class Trainer:
 
     def run(self):
         list_of_rewards = []
-        for _ in range(self.n_episode):
-            observation = self.env.reset()
+        for epoch in range(self.n_episode):
+            state = self.env.reset()
+            state = self.agent_dqn.preprocessing(state)
             done = False
             total_reward = 0
+            print(epoch)
 
             while not done:
-                action = self.agent.choose_action(observation)
-                observation, reward, done, info = self.env.step(action)
+                action = self.agent_dqn.choose_action(state)
+                next_state, reward, done, info = self.env.step(action)
+
+                next_state = self.agent_dqn.preprocessing(next_state)
+                self.agent_dqn.remember((state, action, reward, next_state, done))
+
+                state = next_state
+
                 total_reward += reward
 
+            if epoch % 10 == 9:
+                self.agent_dqn.train(50)
+
+            self.step += 1
             list_of_rewards.append(total_reward)
             self.reward_plot.update_and_plot(list_of_rewards, plot=True, save=False)
         self.env.close()
