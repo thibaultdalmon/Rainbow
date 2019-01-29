@@ -30,6 +30,7 @@ class Trainer:
         self.total_reward = 0
         self.mean_reward = 0.0
         self.checkpoint_path = "../DQN/DQN_test.ckpt"
+        self.w = 0.5
 
         self.reward_plot = RewardPlot()
         self.doubleQlearning = True
@@ -93,8 +94,12 @@ class Trainer:
                 obs, reward, done, info = self.env.step(action)
                 next_state = self.agent_dqn.preprocess_observation(obs)
 
+                # Calculation of the priority for replay
+                q_bar_values = self.agent_dqn.target_q_values.eval(feed_dict={self.agent_dqn.X_state: [state]})
+                weight = np.power(np.abs(reward + self.discount_rate * np.max(q_bar_values) - q_values[0, action]), self.w)
+
                 # Let's memorize what happened
-                self.agent_dqn.memory.append((state, action, reward, next_state, 1.0 - done))
+                self.agent_dqn.memory.append((state, action, reward, next_state, 1.0 - done), weight)
                 state = next_state
 
                 # Compute statistics for tracking progress
