@@ -92,8 +92,8 @@ class DQNAgent:
         img = (img / (3*128) - 128)
         return img.reshape(96, 80, 1)
 
-    def remember(self, data):
-        self.memory.append(data)
+    def remember(self, data, weight=0):
+        self.memory.append(data, weight)
 
     def epsilon_greedy(self, q_values, step):
         epsilon = max(self.eps_min, self.eps_max - (self.eps_max-self.eps_min) * step/self.eps_decay_steps)
@@ -115,17 +115,22 @@ class ReplayMemory:
     def __init__(self):
         self.maxlen = 1000000
         self.buf = np.empty(shape=self.maxlen, dtype=np.object)
+        self.buf_weight = np.zeros(shape=self.maxlen)
         self.index = 0
         self.length = 0
 
-    def append(self, data):
+    def append(self, data, weight=0):
         self.buf[self.index] = data
+        self.buf_weight[self.index] = weight
         self.length = min(self.length + 1, self.maxlen)
         self.index = (self.index + 1) % self.maxlen
 
-    def sample(self, batch_size, with_replacement=True):
-        if with_replacement:
-            indices = np.random.randint(self.length, size=batch_size) # faster
+    def sample(self, batch_size, with_replacement=True, prioritized=True):
+        if prioritized:
+            return np.random.choice(self.buf, p=self.buf_weight)
         else:
-            indices = np.random.permutation(self.length)[:batch_size]
-        return self.buf[indices]
+            if with_replacement:
+                indices = np.random.randint(self.length, size=batch_size) # faster
+            else:
+                indices = np.random.permutation(self.length)[:batch_size]
+            return self.buf[indices]
