@@ -31,6 +31,7 @@ class Trainer:
         self.mean_reward = 0.0
         self.checkpoint_path = "../DQN/DQN_test.ckpt"
         self.w = 0.5
+        self.n_step = 1
 
         self.reward_plot = RewardPlot()
         self.doubleQlearning = True
@@ -66,6 +67,13 @@ class Trainer:
     def run_dqn(self):
         done = True
         list_of_rewards = []
+        list_of_states_per_episode = []
+        list_of_actions_per_episode = []
+        list_of_rewards_per_episode = []
+        list_of_done_per_episode = []
+        list_of_next_state_per_episode = []
+        list_of_weights = []
+        idx_to_store = []
         with tf.Session() as sess:
             if os.path.isfile(self.checkpoint_path + ".index"):
                 self.agent_dqn.saver.restore(sess, self.checkpoint_path)
@@ -80,26 +88,48 @@ class Trainer:
                 print("\rIteration {}\tTraining step {}/{} ({:.1f})%\tLoss {:5f}\tMean Max-Q {:5f}   ".format(
                     self.iteration, step, self.n_episode, step * 100 / self.n_episode,
                     self.loss_val, self.mean_max_q), end="")
-                if done: # game over, start again
+                if done:  # game over, start again
                     obs = self.env.reset()
                     for skip in range(self.skip_start): # skip the start of each game
                         obs, reward, done, info = self.env.step(0)
                     state = self.agent_dqn.preprocess_observation(obs)
+                    list_of_states_per_episode = []
+                    list_of_actions_per_episode = []
+                    list_of_rewards_per_episode = []
+                    list_of_done_per_episode = []
+                    list_of_next_state_per_episode = []
+                    idx_to_store = []
+                    list_of_weights = []
 
                 # Online DQN evaluates what to do
                 q_values = self.agent_dqn.online_q_values.eval(feed_dict={self.agent_dqn.X_state: [state]})
                 action = self.agent_dqn.epsilon_greedy(q_values, step)
+                list_of_states_per_episode.append(state)
+                list_of_actions_per_episode.append(action)
+                idx_to_store.append(self.game_length)
 
                 # Online DQN plays
                 obs, reward, done, info = self.env.step(action)
                 next_state = self.agent_dqn.preprocess_observation(obs)
+                list_of_rewards_per_episode.append(reward)
+                list_of_done_per_episode.append(done)
+                list_of_next_state_per_episode.append(next_state)
 
                 # Calculation of the priority for replay
                 q_bar_values = self.agent_dqn.target_q_values.eval(feed_dict={self.agent_dqn.X_state: [state]})
-                weight = np.power(np.abs(reward + self.discount_rate * np.max(q_bar_values) - q_values[0, action]), self.w)
+                list_of_weights.append(np.power(np.abs(reward + self.discount_rate * np.max(q_bar_values) - q_values[0, action]), self.w))
 
                 # Let's memorize what happened
-                self.agent_dqn.memory.append((state, action, reward, next_state, 1.0 - done), weight)
+                if len(list_of_rewards_per_episode) >= self.n_step:
+                    reward_to_store = np.sum([self.discount_rate ** i_reward * list_of_rewards_per_episode[k_reward]
+                                              for i_reward, k_reward in enumerate(range(- self.n_step, 0))])
+                    to_store = (list_of_states_per_episode[- self.n_step],
+                                list_of_actions_per_episode[- self.n_step],
+                                reward_to_store,
+                                list_of_next_state_per_episode[- self.n_step],
+                                1.0 - list_of_done_per_episode[- self.n_step],)
+                    self.agent_dqn.memory.append(to_store, list_of_weights[- self.n_step])
+                    idx_to_store.pop(- self.n_step)
                 state = next_state
 
                 # Compute statistics for tracking progress
@@ -107,12 +137,24 @@ class Trainer:
                 self.total_reward += reward
                 self.game_length += 1
                 if done:
+                    # Let's memorize the end of the episode
+                    for idx in idx_to_store:
+                        reward_to_store = np.sum([self.discount_rate ** i_reward * list_of_rewards_per_episode[k_reward]
+                                              for i_reward, k_reward in enumerate(range(idx, self.game_length))])
+                        to_store = (list_of_states_per_episode[idx],
+                                list_of_actions_per_episode[idx],
+                                reward_to_store,
+                                list_of_next_state_per_episode[idx],
+                                1.0 - list_of_done_per_episode[idx])
+                        self.agent_dqn.memory.append(to_store, list_of_weights[idx])
+
+                    # statistics
                     self.mean_max_q = self.total_max_q / self.game_length
                     self.total_max_q = 0.0
                     self.mean_reward = self.total_reward / self.game_length
                     self.total_reward = 0.0
                     self.game_length = 0
-                    list_of_rewards.append(self.mean_reward)
+                    list_of_rewards.append(self.total_reward)
                     self.reward_plot.update_and_plot(list_of_rewards, plot=True, save=False)
 
                 if self.iteration < self.training_start or self.iteration % self.training_interval != 0:

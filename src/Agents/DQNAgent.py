@@ -98,8 +98,8 @@ class DQNAgent:
 
 
     def preprocess_observation(self, observation):
-        img = observation[5:197:2,::2] # downsize
-        img = img.sum(axis=2) # to greyscale
+        img = observation[5:197:2, ::2]  # downsize
+        img = img.sum(axis=2)  # to greyscale
         img = (img / (3*128) - 128)
         return img.reshape(96, 80, 1)
 
@@ -138,7 +138,9 @@ class ReplayMemory:
 
     def sample(self, batch_size, with_replacement=True, prioritized=True):
         if prioritized:
-            return np.random.choice(self.buf, p=self.buf_weight)
+            self.buf_weight = self.buf_weight / np.sum(self.buf_weight)
+            indices = np.random.choice(range(self.length), size=min(batch_size, self.length), p=self.buf_weight[:self.length])
+            return self.buf[indices]
         else:
             if with_replacement:
                 indices = np.random.randint(self.length, size=batch_size) # faster
