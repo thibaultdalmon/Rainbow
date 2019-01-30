@@ -5,17 +5,27 @@ class DQNAgent:
 
     def __init__(self, env):
 
-        # to make this output stable across runs
+        # initializing the random behaviour
+        # to make the output stable across runs
         def reset_graph(seed=42):
             tf.reset_default_graph()
             tf.set_random_seed(seed)
             np.random.seed(seed)
         reset_graph()
 
+        # Using Dueling networks architecture (see Rainbow paper)
+        self.dueling = False
+
+        # Using Noisy Nets architecture (see Rainbow paper)
+        self.noisy = False
+        self.epsilon = {}
+
+        # parameters linked to the environment
         self.env = env
         self.input_height = 96
         self.input_width = 80
 
+        # Qnetwork parameters
         self.input_channels = 1
         self.conv_n_maps = [32, 64, 64]
         self.conv_kernel_sizes = [(8,8), (4,4), (3,3)]
@@ -28,20 +38,21 @@ class DQNAgent:
         self.n_outputs = env.action_space.n
         self.initializer = tf.variance_scaling_initializer()
 
+        # training parameters
         self.learning_rate = 0.001
         self.momentum = 0.95
 
+        # replay memory
         self.memory = ReplayMemory()
 
+        # epsilon greedy policy parameters
         self.eps_min = 0.1
         self.eps_max = 1.0
         self.eps_decay_steps = 200000
 
-        self.dueling = True
-        self.noisy = False
+        ################## Defining Qnetwork Blocks ####################
 
-        self.epsilon = {}
-
+        # defining a noisy_linear layer
         def noisy_Linear(x, dim_in, dim_hidden, dim_output,
                 kernel_initializer, i, epsilon_i, epsilon_j):
             with tf.variable_scope(f'noisy_{i}'):
@@ -57,6 +68,7 @@ class DQNAgent:
                                  tf.matmul(x, tf.multiply(sigma_w, epsilon_w))))
 
         if self.noisy:
+            # building the network whith Noisy Nets architecture
             def q_network(X_state, name):
                 prev_layer = X_state / 128.0
                 with tf.variable_scope(name) as scope:
@@ -125,7 +137,9 @@ class DQNAgent:
                                           for var in trainable_vars}
                 return outputs, trainable_vars_by_name
 
+        ################## Building Qnetworks ####################
 
+        # Entry point for noise variables
         self.epsiloni_1 = tf.placeholder(tf.float32, shape=[self.n_hidden_in, 1])
         self.epsilonj_1 = tf.placeholder(tf.float32, shape=[1, self.n_hidden])
         self.epsiloni_2 = tf.placeholder(tf.float32, shape=[self.n_hidden, 1])
@@ -134,6 +148,8 @@ class DQNAgent:
         self.epsilonj_3 = tf.placeholder(tf.float32, shape=[1, self.n_hidden])
         self.epsiloni_4 = tf.placeholder(tf.float32, shape=[self.n_hidden, 1])
         self.epsilonj_4 = tf.placeholder(tf.float32, shape=[1, 1])
+
+        # Instantiation of online and target Qnetworks
         self.X_state = tf.placeholder(tf.float32, shape=[None, self.input_height, self.input_width,
                                             self.input_channels])
         self.online_q_values, self.online_vars = q_network(self.X_state, name="q_networks/online")
@@ -143,6 +159,9 @@ class DQNAgent:
                     for var_name, target_var in self.target_vars.items()]
         self.copy_online_to_target = tf.group(*self.copy_ops)
 
+        # Computing L(y - Q_theta(S_t, A_t)), i.e. a quadratic loss only for small
+        # errors (below 1.0) and a linear loss (twice the absolute error) for
+        # larger errors
         with tf.variable_scope("train"):
             self.X_action = tf.placeholder(tf.int32, shape=[None])
             self.y = tf.placeholder(tf.float32, shape=[None, 1])
@@ -160,16 +179,18 @@ class DQNAgent:
         self.init = tf.global_variables_initializer()
         self.saver = tf.train.Saver()
 
-
+    # preprocessing
     def preprocess_observation(self, observation):
         img = observation[5:197:2, ::2]  # downsize
         img = img.sum(axis=2)  # to greyscale
         img = (img / (3*128) - 128)
         return img.reshape(96, 80, 1)
 
+    # Storing transitions in the replay memory
     def remember(self, data, weight=0):
         self.memory.append(data, weight)
 
+    # Epsilon greedy policy
     def epsilon_greedy(self, q_values, step):
         if self.noisy:
             return np.argmax(q_values) # optimal action
@@ -179,33 +200,35 @@ class DQNAgent:
         else:
             return np.argmax(q_values) # optimal action
 
-    def sample_memories(self, batch_size):
+    # Sampling transitions
+    def sample_memories(self, batch_size, with_replacement=True, prioritized=False):
         cols = [[], [], [], [], []] # state, action, reward, next_state, done
-        for memory in self.memory.sample(batch_size):
+        for memory in self.memory.sample(batch_size, with_replacement, prioritized):
             for col, value in zip(cols, memory):
                 col.append(value)
         cols = [np.array(col) for col in cols]
         return cols[0], cols[1], cols[2].reshape(-1, 1), cols[3], cols[4].reshape(-1, 1)
 
+    # Sampling noise variables
     def reset_network(self):
         if self.noisy:
             if self.dueling:
                 self.epsilon = {
-                    self.epsiloni_1:np.random.randn(7680,1),
-                    self.epsilonj_1:np.random.randn(1,512),
-                    self.epsiloni_2:np.random.randn(512,1),
-                    self.epsilonj_2:np.random.randn(1,18),
-                    self.epsiloni_3:np.random.randn(7680,1),
-                    self.epsilonj_3:np.random.randn(1,512),
-                    self.epsiloni_4:np.random.randn(512,1),
+                    self.epsiloni_1:np.random.randn(self.n_hidden_in,1),
+                    self.epsilonj_1:np.random.randn(1,self.n_hidden),
+                    self.epsiloni_2:np.random.randn(self.n_hidden,1),
+                    self.epsilonj_2:np.random.randn(1,self.n_outputs),
+                    self.epsiloni_3:np.random.randn(self.n_hidden_in,1),
+                    self.epsilonj_3:np.random.randn(1,self.n_hidden),
+                    self.epsiloni_4:np.random.randn(self.n_hidden,1),
                     self.epsilonj_4:np.random.randn(1,1)
                 }
             else:
                 self.epsilon = {
-                    self.epsiloni_1:np.random.randn(7680,1),
-                    self.epsilonj_1:np.random.randn(1,512),
-                    self.epsiloni_2:np.random.randn(512,1),
-                    self.epsilonj_2:np.random.randn(1,18),
+                    self.epsiloni_1:np.random.randn(self.n_hidden_in,1),
+                    self.epsilonj_1:np.random.randn(1,self.n_hidden),
+                    self.epsiloni_2:np.random.randn(self.n_hidden,1),
+                    self.epsilonj_2:np.random.randn(1,self.n_outputs),
                 }
         else:
             return

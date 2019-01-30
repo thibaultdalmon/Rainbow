@@ -10,9 +10,17 @@ import tensorflow as tf
 class Trainer:
 
     def __init__(self, args):
+
+        # Using Double Qlearning (see Rainbow paper)
+        self.doubleQlearning = True
+
+        # Using multi-step RL
+        self.n_step = 10
+
         self.env = gym.make(args.env_name)
         self.agent = RandomAgent(self.env)
         self.agent_dqn = DQNAgent(self.env)
+
         self.n_episode = args.n_episodes # nb of games to play
         self.training_start = 10000  # start training after 10,000 game iterations
         self.training_interval = 4  # run a training step every 4 game iterations
@@ -22,7 +30,7 @@ class Trainer:
         self.skip_start = 0  # Skip the start of every game
         self.batch_size = 32
         self.iteration = 0  # game iterations
-        self.step = 0
+        self.step = 0   # global training step
         self.loss_val = np.infty
         self.game_length = 0
         self.total_max_q = 0
@@ -32,11 +40,10 @@ class Trainer:
         self.checkpoint_path = "../DQN/DQN_test.ckpt"
         self.w = 0.5
 
+        # plotting data
         self.reward_plot = RewardPlot()
-        self.doubleQlearning = True
-        self.n_step = 10
 
-
+    # running random agent
     def run(self):
         list_of_rewards = []
         for epoch in range(self.n_episode):
@@ -65,6 +72,7 @@ class Trainer:
             self.reward_plot.update_and_plot(list_of_rewards, plot=True, save=False)
         self.env.close()
 
+    # running Deep Qlearning agent
     def run_dqn(self):
         done = True
         list_of_rewards = []
@@ -76,19 +84,29 @@ class Trainer:
         list_of_weights = []
         idx_to_store = []
         with tf.Session() as sess:
+
+            # Restoring model if previously trained
             if os.path.isfile(self.checkpoint_path + ".index"):
                 self.agent_dqn.saver.restore(sess, self.checkpoint_path)
             else:
                 self.agent_dqn.init.run()
                 self.agent_dqn.copy_online_to_target.run()
+
+            # Running games and training
             while True:
+
+                # Initializing the number of training steps
                 step = self.agent_dqn.global_step.eval()
                 if step >= self.n_episode:
                     break
                 self.iteration += 1
+
+                # Printing statistics
                 print("\rIteration {}\tTraining step {}/{} ({:.1f})%\tLoss {:5f}\tMean Max-Q {:5f}   ".format(
                     self.iteration, step, self.n_episode, step * 100 / self.n_episode,
                     self.loss_val, self.mean_max_q), end="")
+
+                # Checking if previous game is over
                 if done:  # game over, start again
                     obs = self.env.reset()
                     for skip in range(self.skip_start): # skip the start of each game
@@ -102,6 +120,8 @@ class Trainer:
                     idx_to_store = []
                     list_of_weights = []
 
+                # Sampling noisy variables
+                # If Noisy Nets are not in the Qnetwork, does nothing
                 self.agent_dqn.reset_network()
 
                 # Online DQN evaluates what to do
@@ -155,7 +175,7 @@ class Trainer:
                                 1.0 - list_of_done_per_episode[idx])
                         self.agent_dqn.memory.append(to_store, list_of_weights[idx])
 
-                    # statistics
+                    # Statistics
                     self.mean_max_q = self.total_max_q / self.game_length
                     self.mean_reward = self.total_reward / self.game_length
                     list_of_rewards.append(self.total_reward)
@@ -172,6 +192,7 @@ class Trainer:
                 X_state_val, X_action_val, rewards, X_next_state_val, continues = (
                     self.agent_dqn.sample_memories(self.batch_size))
 
+                # Compute R_t+1 + gamma.Q(S_t+1, argmax(...)) in Double Q-learning
                 if self.doubleQlearning:
                     next_online_actions = self.agent_dqn.online_q_values
                     max_action = tf.argmax(next_online_actions, axis=1)
@@ -184,6 +205,8 @@ class Trainer:
                     target_q_values = next_q_values.eval(
                         feed_dict=full_dict)
                     y_val = rewards + continues * self.discount_rate * target_q_values
+
+                # Compute R_t+1 + gamma.max(Q(S_t+1, ...)) in Q-learning
                 else:
                     full_dict = self.agent_dqn.epsilon
                     full_dict[self.agent_dqn.X_state] = X_next_state_val
