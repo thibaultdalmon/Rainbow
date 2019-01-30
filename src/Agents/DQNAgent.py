@@ -37,7 +37,7 @@ class DQNAgent:
         self.eps_max = 1.0
         self.eps_decay_steps = 200000
 
-        self.dueling = False
+        self.dueling = True
         self.noisy = False
 
         self.epsilon = {}
@@ -126,13 +126,13 @@ class DQNAgent:
                 return outputs, trainable_vars_by_name
 
 
-        self.epsiloni_1 = tf.placeholder(tf.float32, shape=[7680, 1])
-        self.epsilonj_1 = tf.placeholder(tf.float32, shape=[1, 512])
-        self.epsiloni_2 = tf.placeholder(tf.float32, shape=[512, 1])
-        self.epsilonj_2 = tf.placeholder(tf.float32, shape=[1, 18])
-        self.epsiloni_3 = tf.placeholder(tf.float32, shape=[7680, 1])
-        self.epsilonj_3 = tf.placeholder(tf.float32, shape=[1, 512])
-        self.epsiloni_4 = tf.placeholder(tf.float32, shape=[512, 1])
+        self.epsiloni_1 = tf.placeholder(tf.float32, shape=[self.n_hidden_in, 1])
+        self.epsilonj_1 = tf.placeholder(tf.float32, shape=[1, self.n_hidden])
+        self.epsiloni_2 = tf.placeholder(tf.float32, shape=[self.n_hidden, 1])
+        self.epsilonj_2 = tf.placeholder(tf.float32, shape=[1, self.n_outputs])
+        self.epsiloni_3 = tf.placeholder(tf.float32, shape=[self.n_hidden_in, 1])
+        self.epsilonj_3 = tf.placeholder(tf.float32, shape=[1, self.n_hidden])
+        self.epsiloni_4 = tf.placeholder(tf.float32, shape=[self.n_hidden, 1])
         self.epsilonj_4 = tf.placeholder(tf.float32, shape=[1, 1])
         self.X_state = tf.placeholder(tf.float32, shape=[None, self.input_height, self.input_width,
                                             self.input_channels])
@@ -213,7 +213,7 @@ class DQNAgent:
 
 class ReplayMemory:
     def __init__(self):
-        self.maxlen = 1000000
+        self.maxlen = 100000
         self.buf = np.empty(shape=self.maxlen, dtype=np.object)
         self.buf_weight = np.zeros(shape=self.maxlen)
         self.index = 0
@@ -225,7 +225,7 @@ class ReplayMemory:
         self.length = min(self.length + 1, self.maxlen)
         self.index = (self.index + 1) % self.maxlen
 
-    def sample(self, batch_size, with_replacement=True, prioritized=True):
+    def sample(self, batch_size, with_replacement=True, prioritized=False):
         if prioritized:
             self.buf_weight = self.buf_weight / np.sum(self.buf_weight)
             indices = np.random.choice(range(self.length), size=min(batch_size, self.length), p=self.buf_weight[:self.length])

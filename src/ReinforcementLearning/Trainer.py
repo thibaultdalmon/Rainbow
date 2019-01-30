@@ -17,8 +17,8 @@ class Trainer:
         self.training_start = 10000  # start training after 10,000 game iterations
         self.training_interval = 4  # run a training step every 4 game iterations
         self.save_steps = 1000  # save the model every 1,000 training steps
-        self.copy_steps = 10000  # copy online DQN to target DQN every 10,000 training steps
-        self.discount_rate = 0.99
+        self.copy_steps = 1000  # copy online DQN to target DQN every 10,000 training steps
+        self.discount_rate = 0.95
         self.skip_start = 0  # Skip the start of every game
         self.batch_size = 32
         self.iteration = 0  # game iterations
@@ -31,11 +31,11 @@ class Trainer:
         self.mean_reward = 0.0
         self.checkpoint_path = "../DQN/DQN_test.ckpt"
         self.w = 0.5
-        self.n_step = 1
 
         self.reward_plot = RewardPlot()
-        self.doubleQlearning = False
-        self.multiStepLearning = 1
+        self.doubleQlearning = True
+        self.n_step = 10
+
 
     def run(self):
         list_of_rewards = []
@@ -163,8 +163,6 @@ class Trainer:
                     self.total_max_q = 0.0
                     self.total_reward = 0.0
                     self.game_length = 0
-                    list_of_rewards.append(self.total_reward)
-                    self.reward_plot.update_and_plot(list_of_rewards, plot=True, save=False)
 
                 if self.iteration < self.training_start or self.iteration % self.training_interval != 0:
                     continue # only train after warmup period and at regular intervals
@@ -173,7 +171,6 @@ class Trainer:
                 self.agent_dqn.reset_network()
                 X_state_val, X_action_val, rewards, X_next_state_val, continues = (
                     self.agent_dqn.sample_memories(self.batch_size))
-                gamma = self.discount_rate ** self.multiStepLearning
 
                 if self.doubleQlearning:
                     next_online_actions = self.agent_dqn.online_q_values
@@ -186,14 +183,14 @@ class Trainer:
                     full_dict[self.agent_dqn.X_state] = X_next_state_val
                     target_q_values = next_q_values.eval(
                         feed_dict=full_dict)
-                    y_val = rewards + continues * gamma * target_q_values
+                    y_val = rewards + continues * self.discount_rate * target_q_values
                 else:
                     full_dict = self.agent_dqn.epsilon
                     full_dict[self.agent_dqn.X_state] = X_next_state_val
                     next_q_values = self.agent_dqn.target_q_values.eval(
                         feed_dict=full_dict)
                     max_next_q_values = np.max(next_q_values, axis=1, keepdims=True)
-                    y_val = rewards + continues * gamma * max_next_q_values
+                    y_val = rewards + continues * self.discount_rate * max_next_q_values
 
                 # Train the online DQN
                 full_dict = self.agent_dqn.epsilon
