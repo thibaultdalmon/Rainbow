@@ -37,39 +37,103 @@ class DQNAgent:
         self.eps_max = 1.0
         self.eps_decay_steps = 200000
 
-        self.dueling = True
+        self.dueling = False
+        self.noisy = False
 
-        def q_network(X_state, name):
-            prev_layer = X_state / 128.0
-            with tf.variable_scope(name) as scope:
-                for n_maps, kernel_size, strides, padding, activation in zip(
-                        self.conv_n_maps, self.conv_kernel_sizes, self.conv_strides,
-                        self.conv_paddings, self.conv_activation):
-                    prev_layer = tf.layers.conv2d(
-                        prev_layer, filters=n_maps, kernel_size=kernel_size,
-                        strides=strides, padding=padding, activation=activation,
-                        kernel_initializer=self.initializer)
-                last_conv_layer_flat = tf.reshape(prev_layer, shape=[-1, self.n_hidden_in])
-                hidden = tf.layers.dense(last_conv_layer_flat, self.n_hidden,
-                                         activation=self.hidden_activation,
-                                         kernel_initializer=self.initializer)
-                outputs = tf.layers.dense(hidden, self.n_outputs,
-                                          kernel_initializer=self.initializer)
-                if self.dueling:
-                    hidden2 = tf.layers.dense(last_conv_layer_flat, self.n_hidden,
+        self.epsilon = {}
+
+        def noisy_Linear(x, dim_in, dim_hidden, dim_output,
+                kernel_initializer, i, epsilon_i, epsilon_j):
+            with tf.variable_scope(f'noisy_{i}'):
+                y1 = tf.layers.dense(x, dim_output, kernel_initializer=kernel_initializer)
+                sigma_w = tf.get_variable(name="sigma_w", shape=[dim_hidden, dim_output])
+                sigma_b = tf.get_variable(name="sigma_b", shape=[dim_in, dim_output])
+
+                epsilon_w = tf.matmul(tf.multiply(tf.sign(epsilon_i),tf.sqrt(tf.abs(epsilon_i))),
+                    tf.multiply(tf.sign(epsilon_j),tf.sqrt(tf.abs(epsilon_j))))
+                epsilon_b = tf.multiply(tf.sign(epsilon_j),tf.sqrt(tf.abs(epsilon_j)))
+            return tf.add(y1,
+                          tf.add(tf.multiply(sigma_b, epsilon_b),
+                                 tf.matmul(x, tf.multiply(sigma_w, epsilon_w))))
+
+        if self.noisy:
+            def q_network(X_state, name):
+                prev_layer = X_state / 128.0
+                with tf.variable_scope(name) as scope:
+                    for n_maps, kernel_size, strides, padding, activation in zip(
+                            self.conv_n_maps, self.conv_kernel_sizes, self.conv_strides,
+                            self.conv_paddings, self.conv_activation):
+                        prev_layer = tf.layers.conv2d(
+                            prev_layer, filters=n_maps, kernel_size=kernel_size,
+                            strides=strides, padding=padding, activation=activation,
+                            kernel_initializer=self.initializer)
+                    last_conv_layer_flat = tf.reshape(prev_layer, shape=[-1, self.n_hidden_in])
+                    hidden = noisy_Linear(last_conv_layer_flat, 1, self.n_hidden_in,
+                                            self.n_hidden,
+                                            self.initializer, 1,
+                                            self.epsiloni_1, self.epsilonj_1)
+                    hidden = tf.nn.relu(hidden)
+                    outputs = noisy_Linear(hidden, 1, self.n_hidden, self.n_outputs,
+                                              self.initializer, 2,
+                                              self.epsiloni_2, self.epsilonj_2)
+                    if self.dueling:
+                        hidden2 = noisy_Linear(last_conv_layer_flat, 1, self.n_hidden_in,
+                                                 self.n_hidden,
+                                                 self.initializer, 3,
+                                                 self.epsiloni_3, self.epsilonj_3)
+                        hidden2 = tf.nn.relu(hidden2)
+                        estimate_value = noisy_Linear(hidden2, 1, self.n_hidden, 1,
+                                                  self.initializer, 4,
+                                                  self.epsiloni_4, self.epsilonj_4)
+                        advantage = tf.subtract(outputs,tf.reduce_mean(outputs, axis=1, keepdims=True))
+                        outputs = tf.add(estimate_value, advantage)
+
+                trainable_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
+                                                   scope=scope.name)
+                trainable_vars_by_name = {var.name[len(scope.name):]: var
+                                          for var in trainable_vars}
+                return outputs, trainable_vars_by_name
+        else:
+            def q_network(X_state, name):
+                prev_layer = X_state / 128.0
+                with tf.variable_scope(name) as scope:
+                    for n_maps, kernel_size, strides, padding, activation in zip(
+                            self.conv_n_maps, self.conv_kernel_sizes, self.conv_strides,
+                            self.conv_paddings, self.conv_activation):
+                        prev_layer = tf.layers.conv2d(
+                            prev_layer, filters=n_maps, kernel_size=kernel_size,
+                            strides=strides, padding=padding, activation=activation,
+                            kernel_initializer=self.initializer)
+                    last_conv_layer_flat = tf.reshape(prev_layer, shape=[-1, self.n_hidden_in])
+                    hidden = tf.layers.dense(last_conv_layer_flat, self.n_hidden,
                                              activation=self.hidden_activation,
                                              kernel_initializer=self.initializer)
-                    estimate_value = tf.layers.dense(hidden2, 1,
+                    outputs = tf.layers.dense(hidden, self.n_outputs,
                                               kernel_initializer=self.initializer)
-                    advantage = tf.subtract(outputs,tf.reduce_mean(outputs, axis=1, keepdims=True))
-                    outputs = tf.add(estimate_value, advantage)
+                    if self.dueling:
+                        hidden2 = tf.layers.dense(last_conv_layer_flat, self.n_hidden,
+                                                 activation=self.hidden_activation,
+                                                 kernel_initializer=self.initializer)
+                        estimate_value = tf.layers.dense(hidden2, 1,
+                                                  kernel_initializer=self.initializer)
+                        advantage = tf.subtract(outputs,tf.reduce_mean(outputs, axis=1, keepdims=True))
+                        outputs = tf.add(estimate_value, advantage)
 
-            trainable_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
-                                               scope=scope.name)
-            trainable_vars_by_name = {var.name[len(scope.name):]: var
-                                      for var in trainable_vars}
-            return outputs, trainable_vars_by_name
+                trainable_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
+                                                   scope=scope.name)
+                trainable_vars_by_name = {var.name[len(scope.name):]: var
+                                          for var in trainable_vars}
+                return outputs, trainable_vars_by_name
 
+
+        self.epsiloni_1 = tf.placeholder(tf.float32, shape=[7680, 1])
+        self.epsilonj_1 = tf.placeholder(tf.float32, shape=[1, 512])
+        self.epsiloni_2 = tf.placeholder(tf.float32, shape=[512, 1])
+        self.epsilonj_2 = tf.placeholder(tf.float32, shape=[1, 18])
+        self.epsiloni_3 = tf.placeholder(tf.float32, shape=[7680, 1])
+        self.epsilonj_3 = tf.placeholder(tf.float32, shape=[1, 512])
+        self.epsiloni_4 = tf.placeholder(tf.float32, shape=[512, 1])
+        self.epsilonj_4 = tf.placeholder(tf.float32, shape=[1, 1])
         self.X_state = tf.placeholder(tf.float32, shape=[None, self.input_height, self.input_width,
                                             self.input_channels])
         self.online_q_values, self.online_vars = q_network(self.X_state, name="q_networks/online")
@@ -107,6 +171,8 @@ class DQNAgent:
         self.memory.append(data)
 
     def epsilon_greedy(self, q_values, step):
+        if self.noisy:
+            return np.argmax(q_values) # optimal action
         epsilon = max(self.eps_min, self.eps_max - (self.eps_max-self.eps_min) * step/self.eps_decay_steps)
         if np.random.rand() < epsilon:
             return np.random.randint(self.n_outputs) # random action
@@ -120,6 +186,29 @@ class DQNAgent:
                 col.append(value)
         cols = [np.array(col) for col in cols]
         return cols[0], cols[1], cols[2].reshape(-1, 1), cols[3], cols[4].reshape(-1, 1)
+
+    def reset_network(self):
+        if self.noisy:
+            if self.dueling:
+                self.epsilon = {
+                    self.epsiloni_1:np.random.randn(7680,1),
+                    self.epsilonj_1:np.random.randn(1,512),
+                    self.epsiloni_2:np.random.randn(512,1),
+                    self.epsilonj_2:np.random.randn(1,18),
+                    self.epsiloni_3:np.random.randn(7680,1),
+                    self.epsilonj_3:np.random.randn(1,512),
+                    self.epsiloni_4:np.random.randn(512,1),
+                    self.epsilonj_4:np.random.randn(1,1)
+                }
+            else:
+                self.epsilon = {
+                    self.epsiloni_1:np.random.randn(7680,1),
+                    self.epsilonj_1:np.random.randn(1,512),
+                    self.epsiloni_2:np.random.randn(512,1),
+                    self.epsilonj_2:np.random.randn(1,18),
+                }
+        else:
+            return
 
 
 class ReplayMemory:

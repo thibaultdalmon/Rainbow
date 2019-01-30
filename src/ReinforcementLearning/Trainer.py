@@ -33,7 +33,8 @@ class Trainer:
         self.w = 0.5
 
         self.reward_plot = RewardPlot()
-        self.doubleQlearning = True
+        self.doubleQlearning = False
+        self.multiStepLearning = 1
 
     def run(self):
         list_of_rewards = []
@@ -86,8 +87,12 @@ class Trainer:
                         obs, reward, done, info = self.env.step(0)
                     state = self.agent_dqn.preprocess_observation(obs)
 
+                self.agent_dqn.reset_network()
+
                 # Online DQN evaluates what to do
-                q_values = self.agent_dqn.online_q_values.eval(feed_dict={self.agent_dqn.X_state: [state]})
+                full_dict = self.agent_dqn.epsilon
+                full_dict[self.agent_dqn.X_state] = [state]
+                q_values = self.agent_dqn.online_q_values.eval(feed_dict=full_dict)
                 action = self.agent_dqn.epsilon_greedy(q_values, step)
 
                 # Online DQN plays
@@ -95,11 +100,13 @@ class Trainer:
                 next_state = self.agent_dqn.preprocess_observation(obs)
 
                 # Calculation of the priority for replay
-                q_bar_values = self.agent_dqn.target_q_values.eval(feed_dict={self.agent_dqn.X_state: [state]})
+                full_dict = self.agent_dqn.epsilon
+                full_dict[self.agent_dqn.X_state] = [state]
+                q_bar_values = self.agent_dqn.target_q_values.eval(feed_dict=full_dict)
                 weight = np.power(np.abs(reward + self.discount_rate * np.max(q_bar_values) - q_values[0, action]), self.w)
 
                 # Let's memorize what happened
-                self.agent_dqn.memory.append((state, action, reward, next_state, 1.0 - done), weight)
+                self.agent_dqn.memory.append((state, action, reward, next_state, 1.0 - done))
                 state = next_state
 
                 # Compute statistics for tracking progress
@@ -108,19 +115,23 @@ class Trainer:
                 self.game_length += 1
                 if done:
                     self.mean_max_q = self.total_max_q / self.game_length
-                    self.total_max_q = 0.0
                     self.mean_reward = self.total_reward / self.game_length
+                    list_of_rewards.append(self.total_reward)
+                    self.reward_plot.update_and_plot(list_of_rewards, plot=True, save=False)
+                    self.total_max_q = 0.0
                     self.total_reward = 0.0
                     self.game_length = 0
-                    list_of_rewards.append(self.mean_reward)
-                    self.reward_plot.update_and_plot(list_of_rewards, plot=True, save=False)
+
 
                 if self.iteration < self.training_start or self.iteration % self.training_interval != 0:
                     continue # only train after warmup period and at regular intervals
 
                 # Sample memories and use the target DQN to produce the target Q-Value
+                self.agent_dqn.reset_network()
                 X_state_val, X_action_val, rewards, X_next_state_val, continues = (
                     self.agent_dqn.sample_memories(self.batch_size))
+                gamma = self.discount_rate ** self.multiStepLearning
+
                 if self.doubleQlearning:
                     next_online_actions = self.agent_dqn.online_q_values
                     max_action = tf.argmax(next_online_actions, axis=1)
@@ -128,20 +139,26 @@ class Trainer:
                     next_q_values = tf.reduce_sum(
                         q_values * tf.one_hot(max_action, self.env.action_space.n),
                         axis=1, keepdims=True)
+                    full_dict = self.agent_dqn.epsilon
+                    full_dict[self.agent_dqn.X_state] = X_next_state_val
                     target_q_values = next_q_values.eval(
-                        feed_dict={self.agent_dqn.X_state: X_next_state_val})
-                    y_val = rewards + continues * self.discount_rate * target_q_values
+                        feed_dict=full_dict)
+                    y_val = rewards + continues * gamma * target_q_values
                 else:
+                    full_dict = self.agent_dqn.epsilon
+                    full_dict[self.agent_dqn.X_state] = X_next_state_val
                     next_q_values = self.agent_dqn.target_q_values.eval(
-                        feed_dict={self.agent_dqn.X_state: X_next_state_val})
+                        feed_dict=full_dict)
                     max_next_q_values = np.max(next_q_values, axis=1, keepdims=True)
-                    y_val = rewards + continues * self.discount_rate * max_next_q_values
+                    y_val = rewards + continues * gamma * max_next_q_values
 
                 # Train the online DQN
+                full_dict = self.agent_dqn.epsilon
+                full_dict[self.agent_dqn.X_state] = X_state_val
+                full_dict[self.agent_dqn.X_action] = X_action_val
+                full_dict[self.agent_dqn.y] = y_val
                 _, self.loss_val = sess.run([self.agent_dqn.training_op, self.agent_dqn.loss],
-                    feed_dict={self.agent_dqn.X_state: X_state_val,
-                    self.agent_dqn.X_action: X_action_val,
-                    self.agent_dqn.y: y_val})
+                    feed_dict=full_dict)
 
                 # Regularly copy the online DQN to the target DQN
                 if step % self.copy_steps == 0:
